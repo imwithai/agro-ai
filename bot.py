@@ -35,6 +35,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"]
+REQUIRED_CHANNELS = [x.strip() for x in os.getenv("REQUIRED_CHANNELS", "").split(",") if x.strip()]
 
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     logger.error("Missing TELEGRAM_BOT_TOKEN or GEMINI_API_KEY environment variables.")
@@ -77,6 +78,46 @@ Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 🛡️ <b>5. Oldini olish maslahati:</b>
 [Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
 """
+
+def get_subscription_keyboard(unsubscribed_channels: list[str]) -> InlineKeyboardMarkup:
+    """Generates an inline keyboard with URLs to unsubscribed channels."""
+    keyboard = []
+    for channel in unsubscribed_channels:
+        # channel starts with @, remove it for the url
+        channel_username = channel.replace('@', '')
+        url = f"https://t.me/{channel_username}"
+        keyboard.append([InlineKeyboardButton(text="➕ Kanalga a'zo bo'lish", url=url)])
+
+    keyboard.append([InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_subs")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+async def require_subscription(message: Message) -> bool:
+    """Checks subscription and prompts user if needed. Returns True if block should occur."""
+    unsubscribed = await get_unsubscribed_channels(message.from_user.id)
+    if unsubscribed:
+        await message.answer(
+            "🛑 <b>Botdan foydalanish uchun rasmiy kanalimizga obuna bo'ling!</b>\n\n"
+            "Obuna bo'lgach, pastdagi <b>«✅ Obunani tekshirish»</b> tugmasini bosing.",
+            reply_markup=get_subscription_keyboard(unsubscribed)
+        )
+        return True
+    return False
+
+async def get_unsubscribed_channels(user_id: int) -> list[str]:
+    """Returns a list of required channels the user is not subscribed to."""
+    if not REQUIRED_CHANNELS or user_id in ADMIN_IDS:
+        return []
+
+    unsubscribed = []
+    for channel in REQUIRED_CHANNELS:
+        try:
+            member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                unsubscribed.append(channel)
+        except TelegramAPIError as e:
+            logger.warning(f"Error checking sub for {channel}: {e}. Skipping check.")
+            # If bot is not admin in channel, allow bypass so it doesn't break
+    return unsubscribed
 
 USERS_FILE = "users.txt"
 
@@ -146,6 +187,16 @@ async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("❌ Reklama tarqatish bekor qilindi.")
     await callback.answer()
 
+@dp.callback_query(F.data == "check_subs")
+async def check_subs_callback(callback: CallbackQuery):
+    unsubscribed = await get_unsubscribed_channels(callback.from_user.id)
+    if not unsubscribed:
+        await callback.message.delete()
+        await callback.message.answer("✅ <b>Rahmat! Obuna tasdiqlandi. Endi kasallangan o'simlik rasmini yuborishingiz mumkin!</b>")
+        await callback.answer()
+    else:
+        await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz!", show_alert=True)
+
 @dp.message(Command("help"))
 async def help_command_handler(message: Message) -> None:
     """Help command for users to get support."""
@@ -213,6 +264,9 @@ async def command_start_handler(message: Message) -> None:
     """
     add_user(message.from_user.id)
 
+    if await require_subscription(message):
+        return
+
     welcome_text = (
         "👋 Assalomu alaykum! Men Agro-Doktor AI - sun'iy intellektga asoslangan o'simliklar shifokoriman.\n\n"
         "🌱 Ekinlaringiz, gullaringiz yoki daraxtlaringiz kasallangan bo'lsa, menga ularning bargi, mevasi yoki poyasi <b>rasmini yuboring</b>.\n"
@@ -227,6 +281,9 @@ async def handle_photo(message: Message) -> None:
     """
     This handler receives photos (with or without captions), adds them to the chat context, and replies with a diagnosis.
     """
+    if await require_subscription(message):
+        return
+
     wait_message = await message.answer("🔍 Rasm tahlil qilinmoqda, iltimos kuting...")
 
     try:
