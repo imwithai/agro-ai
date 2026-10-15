@@ -73,20 +73,6 @@ Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 [Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
 """
 
-# Specialized agronomy prompt for text-only questions
-TEXT_AGRONOMY_PROMPT = """
-Sen 20 yillik tajribaga ega professional agronom va o'simliklar shifokorisan.
-Mijoz senga qishloq xo'jaligi, dehqonchilik yoki o'simliklar parvarishi haqida savol beradi.
-Sening vazifang - oddiy, tushunarli va dehqonbop o'zbek tilida qisqa va aniq javob berish.
-Javobing Telegramda mobil ekranda o'qishga qulay bo'lishi kerak.
-Ortiqcha uzun gaplardan saqlan. Asosiy atamalarni qalin qilib yoz.
-Agar kerak bo'lsa, dori vositalari, xalqona usullar va tavsiyalarni aniq ko'rsat.
-
-DIQQAT (GUARDRAIL):
-Agar foydalanuvchining savoli qishloq xo'jaligi, o'simliklar, dehqonchilik yoki bog'dorchilikka umuman aloqador bo'lmasa (masalan, dasturlash, matematika, siyosat va hokazo), sen HECH QANDAY ma'lumot bermasdan faqatgina quyidagi matnni qaytarishing shart:
-"🌱 Kechirasiz, men faqat o'simliklar, dehqonchilik va kasalliklar bo'yicha maslahat beraman. Iltimos, ekinlaringiz bo'yicha savol bering yoki rasm yuboring."
-"""
-
 def get_user_history(user_id: int):
     """Gets the chat history for a user, maintaining stateless context."""
     if user_id not in user_histories:
@@ -317,41 +303,6 @@ async def handle_photo(message: Message) -> None:
     except Exception as e:
         pop_last_user_message(message.from_user.id)
         logger.error(f"Error handling photo: {e}", exc_info=True)
-        await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
-
-@dp.message(F.text & ~F.text.startswith('/'))
-async def handle_text(message: Message) -> None:
-    """
-    This handler receives text-only follow-up questions from the user.
-    It processes text questions statelessly to prevent chat history corruption.
-    It ignores messages starting with a slash (commands).
-    """
-    wait_message = await message.answer("💬 Javob tayyorlanmoqda...")
-
-    try:
-        response = await gemini_client.aio.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=message.text,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=TEXT_AGRONOMY_PROMPT,
-                temperature=0.7
-            )
-        )
-
-        if response.text:
-            await wait_message.edit_text(response.text)
-        else:
-            await wait_message.edit_text("❌ Kechirasiz, javob shakllantirib bo'lmadi.")
-
-    except APIError as e:
-        if "503" in str(e):
-            logger.warning(f"Gemini API 503 Service Unavailable: {e}")
-            await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
-        else:
-            logger.error(f"Gemini API Error: {e}", exc_info=True)
-            await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
-    except Exception as e:
-        logger.error(f"Error handling text: {e}", exc_info=True)
         await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
 
 
