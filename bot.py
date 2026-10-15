@@ -40,6 +40,9 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=Pars
 dp = Dispatcher()
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
+# Store chat sessions per user ID
+user_chats = {}
+
 # Specialized agronomy prompt for Gemini
 AGRONOMY_PROMPT = """
 Sen 20 yillik tajribaga ega professional agronom va o'simliklar shifokorisan.
@@ -69,6 +72,17 @@ Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 🛡️ **5. Oldini olish maslahati:**
 [Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
 """
+
+def get_or_create_chat(user_id: int):
+    """Gets an existing chat session or creates a new one for the user."""
+    if user_id not in user_chats:
+        user_chats[user_id] = gemini_client.aio.chats.create(
+            model='gemini-3.8-flash',
+            config=genai_types.GenerateContentConfig(
+                system_instruction=AGRONOMY_PROMPT
+            )
+        )
+    return user_chats[user_id]
 
 USERS_FILE = "users.txt"
 
@@ -202,7 +216,7 @@ async def command_start_handler(message: Message) -> None:
 @dp.message(F.photo)
 async def handle_photo(message: Message) -> None:
     """
-    This handler receives photos, sends them to Gemini AI and replies with a diagnosis.
+    This handler receives photos (with or without captions), adds them to the chat context, and replies with a diagnosis.
     """
     wait_message = await message.answer("🔍 Rasm tahlil qilinmoqda, iltimos kuting...")
 
@@ -219,15 +233,19 @@ async def handle_photo(message: Message) -> None:
             return
 
         image_bytes = downloaded_file.read()
+        image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type='image/jpeg')
 
-        # Call Gemini AI asynchronously
-        response = await gemini_client.aio.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=[
-                AGRONOMY_PROMPT,
-                genai_types.Part.from_bytes(data=image_bytes, mime_type='image/jpeg')
-            ]
-        )
+        # Prepare contents (include caption if user sent one)
+        contents = [image_part]
+        if message.caption:
+            contents.append(message.caption)
+        elif not user_chats.get(message.from_user.id):
+            # First message with no caption
+            contents.append("Iltimos ushbu rasmdagi o'simlikni tahlil qilib bering.")
+
+        # Get chat session and send message
+        chat = get_or_create_chat(message.from_user.id)
+        response = await chat.send_message(contents)
 
         # Reply with the result
         if response.text:
@@ -244,6 +262,33 @@ async def handle_photo(message: Message) -> None:
             await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
     except Exception as e:
         logger.error(f"Error handling photo: {e}", exc_info=True)
+        await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
+
+@dp.message(F.text)
+async def handle_text(message: Message) -> None:
+    """
+    This handler receives text-only follow-up questions from the user and maintains conversational context.
+    """
+    wait_message = await message.answer("✍️ Yozilmoqda...")
+
+    try:
+        chat = get_or_create_chat(message.from_user.id)
+        response = await chat.send_message(message.text)
+
+        if response.text:
+            await wait_message.edit_text(response.text)
+        else:
+            await wait_message.edit_text("❌ Kechirasiz, javob shakllantirib bo'lmadi.")
+
+    except APIError as e:
+        if "503" in str(e):
+            logger.warning(f"Gemini API 503 Service Unavailable: {e}")
+            await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
+        else:
+            logger.error(f"Gemini API Error: {e}", exc_info=True)
+            await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
+    except Exception as e:
+        logger.error(f"Error handling text: {e}", exc_info=True)
         await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
 
 
