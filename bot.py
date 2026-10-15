@@ -11,7 +11,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramAPIError
@@ -128,6 +128,18 @@ def get_config() -> dict:
 def save_config(data: dict):
     save_db(CONFIG_DB_FILE, data)
 
+def get_main_keyboard():
+    """Returns the persistent main keyboard."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📸 Rasm yuborish (Tahlil qilish)")],
+            [KeyboardButton(text="👑 VIP Obuna"), KeyboardButton(text="🤝 Do'stni taklif qilish")],
+            [KeyboardButton(text="ℹ️ Yordam (/help)")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
 def get_subscription_keyboard(unsubscribed_channels: list[str]) -> InlineKeyboardMarkup:
     """Generates an inline keyboard with URLs to unsubscribed channels."""
     keyboard = []
@@ -167,19 +179,6 @@ async def get_unsubscribed_channels(user_id: int) -> list[str]:
             logger.warning(f"Error checking sub for {channel}: {e}. Skipping check.")
             # If bot is not admin in channel, allow bypass so it doesn't break
     return unsubscribed
-
-USERS_FILE = "users.txt"
-
-def add_user(user_id: int):
-    """Adds a user ID to users.txt if not already present."""
-    users = set()
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "r") as f:
-            users = set(f.read().splitlines())
-
-    if str(user_id) not in users:
-        with open(USERS_FILE, "a") as f:
-            f.write(f"{user_id}\n")
 
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
@@ -233,12 +232,19 @@ async def admin_callbacks(callback: CallbackQuery, state: FSMContext):
     action = callback.data.split("_")[1]
 
     if action == "stats":
-        users = []
-        if os.path.exists(USERS_FILE):
-            with open(USERS_FILE, "r") as f:
-                users = f.read().splitlines()
+        db = load_db(USERS_DB_FILE, {})
+        total_users = len(db)
+        active_vips = sum(1 for u in db.values() if u.get("is_vip"))
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        daily_active = sum(1 for u in db.values() if u.get("last_analysis_date") == today and u.get("request_count", 0) > 0)
+
         await callback.answer()
-        await callback.message.answer(f"📊 <b>Statistika:</b>\n\nJami foydalanuvchilar: {len(users)} ta")
+        await callback.message.answer(
+            f"📊 <b>Statistika:</b>\n\n"
+            f"👥 Jami foydalanuvchilar: {total_users} ta\n"
+            f"👑 Faol VIP obunachilar: {active_vips} ta\n"
+            f"📈 Bugungi faol foydalanuvchilar: {daily_active} ta"
+        )
 
     elif action == "broadcast":
         await callback.answer()
@@ -536,10 +542,8 @@ async def process_broadcast_message(message: Message, state: FSMContext) -> None
 
     await state.clear()
 
-    users = []
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "r") as f:
-            users = f.read().splitlines()
+    db = load_db(USERS_DB_FILE, {})
+    users = list(db.keys())
 
     if not users:
         await message.answer("❌ Foydalanuvchilar ro'yxati bo'sh!")
@@ -550,8 +554,9 @@ async def process_broadcast_message(message: Message, state: FSMContext) -> None
     success_count = 0
     fail_count = 0
 
-    for user_id in users:
+    for user_id_str in users:
         try:
+            user_id = int(user_id_str)
             await message.send_copy(chat_id=user_id)
             success_count += 1
             await asyncio.sleep(0.05) # Prevent hitting rate limits
@@ -631,7 +636,7 @@ async def command_start_handler(message: Message) -> None:
         "Men darhol kasallikni aniqlayman va uni davolash rejasini taqdim etaman!\n\n"
         "📸 Iltimos, muammoni aniq ko'rsatadigan rasm yuboring."
     )
-    await message.answer(welcome_text)
+    await message.answer(welcome_text, reply_markup=get_main_keyboard())
 
 @dp.message(Command("promo"))
 async def promo_command_handler(message: Message) -> None:
@@ -751,11 +756,23 @@ async def handle_photo(message: Message) -> None:
 
 @dp.message(F.text & ~F.text.startswith('/'))
 async def handle_text_fallback(message: Message) -> None:
-    """Fallback handler for text messages telling users to send a photo."""
-    await message.answer(
-        "🌱 Kechirasiz, men matnli savollarga javob bera olmayman.\n\n"
-        "Iltimos, ekinlaringiz yoki o'simliklaringizdagi kasallikni aniqlash uchun menga ularning <b>rasmini yuboring</b> 📸"
-    )
+    """Fallback handler for text messages and keyboard buttons."""
+    text = message.text
+
+    if text == "📸 Rasm yuborish (Tahlil qilish)":
+        await message.answer("📸 <b>Iltimos, ekinlaringiz yoki o'simliklaringizdagi kasallikni aniqlash uchun menga ularning rasmini yuboring.</b>")
+    elif text == "👑 VIP Obuna":
+        await vip_command_handler(message)
+    elif text == "🤝 Do'stni taklif qilish":
+        await referral_command_handler(message)
+    elif text == "ℹ️ Yordam (/help)":
+        await help_command_handler(message)
+    else:
+        await message.answer(
+            "🌱 Kechirasiz, men matnli savollarga javob bera olmayman.\n\n"
+            "Iltimos, ekinlaringiz yoki o'simliklaringizdagi kasallikni aniqlash uchun menga ularning <b>rasmini yuboring</b> 📸",
+            reply_markup=get_main_keyboard()
+        )
 
 async def health_check(request: web.Request) -> web.Response:
     """Minimal health check endpoint for Render."""
