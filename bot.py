@@ -13,14 +13,18 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramAPIError
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+    # Load environment variables
+    load_dotenv()
+except ImportError:
+    # python-dotenv is not installed, assume env vars are set by Render
+    pass
 
 from google import genai
 from google.genai import types as genai_types
 from google.genai.errors import APIError
-
-# Load environment variables
-load_dotenv()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -305,6 +309,9 @@ async def start_web_server():
     await site.start()
 
 async def main() -> None:
+    # Drop pending updates to avoid webhook conflict
+    await bot.delete_webhook(drop_pending_updates=True)
+
     # Start web server and bot polling concurrently
     logger.info("Starting bot and web server...")
 
