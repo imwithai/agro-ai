@@ -36,7 +36,7 @@ if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     sys.exit(1)
 
 # Initialize Bot, Dispatcher and Gemini Client
-bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -49,53 +49,29 @@ Sen 20 yillik tajribaga ega professional agronom va o'simliklar shifokorisan.
 Mijoz senga kasal bo'lgan o'simlik bargi, mevasi yoki poyasi rasmini yuboradi.
 Sening vazifang - rasmga qarab o'simlik kasalligi yoki zararkunandasini aniqlash va qishloq xo'jaligiga oid oddiy va tushunarli, dehqonbop o'zbek tilida javob berish.
 Javobing qisqa, tushunarli va Telegramda mobil ekranda o'qishga qulay bo'lishi kerak.
-Ortiqcha uzun gaplardan saqlan. Asosiy atamalarni qalin qilib yoz.
+Ortiqcha uzun gaplardan saqlan. Qalin matn uchun faqat <b> so'z </b> va kursiv uchun <i> so'z </i> HTML taglaridan foydalan. Hech qachon Markdown (**, *) ishlatma!
 
 Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 
-🌱 **AGRO-DOKTOR TASHXISI**
+🌱 <b>AGRO-DOKTOR TASHXISI</b>
 
-🔍 **1. Aniqlangan muammo:**
+🔍 <b>1. Aniqlangan muammo:</b>
 [Kasallik yoki zararkunanda nomi va foizi]
 
-⚠️ **2. Kelib chiqish sababi:**
+⚠️ <b>2. Kelib chiqish sababi:</b>
 [1-2 jumlada asosiy sabab]
 
-💊 **3. Tavsiya etilgan dori (Kimyoviy):**
-- *Preparat nomi:* [Preparat nomi (Masalan: Skor yoki Ridomil Gold)]
-- *Me'yori:* [10 litr suvga qancha solinishi]
-- *Sepish tartibi:* [Qachon va qanday qo'llanilishi]
+💊 <b>3. Tavsiya etilgan dori (Kimyoviy):</b>
+- <i>Preparat nomi:</i> [Preparat nomi (Masalan: Skor yoki Ridomil Gold)]
+- <i>Me'yori:</i> [10 litr suvga qancha solinishi]
+- <i>Sepish tartibi:</i> [Qachon va qanday qo'llanilishi]
 
-🌿 **4. Xalqona usul (Tabiiy yechim):**
+🌿 <b>4. Xalqona usul (Tabiiy yechim):</b>
 [1 ta eng oson va samarali uy sharoitidagi usul]
 
-🛡️ **5. Oldini olish maslahati:**
+🛡️ <b>5. Oldini olish maslahati:</b>
 [Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
 """
-
-def get_user_history(user_id: int):
-    """Gets the chat history for a user, maintaining stateless context."""
-    if user_id not in user_histories:
-        user_histories[user_id] = []
-    return user_histories[user_id]
-
-def update_user_history(user_id: int, role: str, parts: list):
-    """Appends a new message to the user's history and truncates if too long."""
-    history = get_user_history(user_id)
-    history.append(genai_types.Content(role=role, parts=parts))
-    # Keep history manageable (e.g., last 10 messages) to prevent token limits
-    # Gemini requires alternating roles and the first role must be 'user'
-    if len(history) > 10:
-        sliced_history = history[-10:]
-        if sliced_history[0].role != "user":
-            sliced_history = sliced_history[1:]
-        user_histories[user_id] = sliced_history
-
-def pop_last_user_message(user_id: int):
-    """Removes the last user message from history on API failure to prevent back-to-back user roles."""
-    history = get_user_history(user_id)
-    if history and history[-1].role == "user":
-        history.pop()
 
 USERS_FILE = "users.txt"
 
@@ -128,7 +104,7 @@ async def admin_handler(message: Message) -> None:
     """Admin panel handler."""
     if message.from_user.id not in ADMIN_IDS:
         return
-    await message.answer("🛠 *Admin Paneliga xush kelibsiz!*", reply_markup=get_admin_keyboard())
+    await message.answer("🛠 <b>Admin Paneliga xush kelibsiz!</b>", reply_markup=get_admin_keyboard())
 
 @dp.callback_query(F.data.startswith("admin_"))
 async def admin_callbacks(callback: CallbackQuery, state: FSMContext):
@@ -144,18 +120,18 @@ async def admin_callbacks(callback: CallbackQuery, state: FSMContext):
             with open(USERS_FILE, "r") as f:
                 users = f.read().splitlines()
         await callback.answer()
-        await callback.message.answer(f"📊 *Statistika:*\n\nJami foydalanuvchilar: {len(users)} ta")
+        await callback.message.answer(f"📊 <b>Statistika:</b>\n\nJami foydalanuvchilar: {len(users)} ta")
 
     elif action == "broadcast":
         await callback.answer()
         await state.set_state(BroadcastState.waiting_for_message)
-        await callback.message.answer("📢 *Reklama tarqatish*\n\nTarqatmoqchi bo'lgan xabaringizni yuboring (matn, rasm yoki video):", reply_markup=InlineKeyboardMarkup(
+        await callback.message.answer("📢 <b>Reklama tarqatish</b>\n\nTarqatmoqchi bo'lgan xabaringizni yuboring (matn, rasm yoki video):", reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_broadcast")]]
         ))
 
     elif action == "support":
         await callback.answer()
-        await callback.message.answer("🛠 *Qo'llab-quvvatlash*\n\nFoydalanuvchilar savol yo'llashlari uchun admin bilan bog'lanish:\n@AdminUsername (sozlash mumkin)")
+        await callback.message.answer("🛠 <b>Qo'llab-quvvatlash</b>\n\nFoydalanuvchilar savol yo'llashlari uchun admin bilan bog'lanish:\n@AdminUsername (sozlash mumkin)")
 
 @dp.callback_query(F.data == "cancel_broadcast")
 async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
@@ -169,7 +145,7 @@ async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
 async def help_command_handler(message: Message) -> None:
     """Help command for users to get support."""
     await message.answer(
-        "🛠 *Qo'llab-quvvatlash bo'limi*\n\n"
+        "🛠 <b>Qo'llab-quvvatlash bo'limi</b>\n\n"
         "Savollaringiz yoki takliflaringiz bo'lsa, adminga murojaat qilishingiz mumkin:\n"
         "👉 @AdminUsername"
     )
@@ -178,13 +154,13 @@ async def help_command_handler(message: Message) -> None:
 async def privacy_command_handler(message: Message) -> None:
     """Privacy and Terms of Use command handler."""
     privacy_text = (
-        "🔐 *Maxfiylik va Xavfsizlik*\n"
+        "🔐 <b>Maxfiylik va Xavfsizlik</b>\n"
         "Sizning xavfsizligingiz biz uchun muhim. Siz yuborgan rasmlar va xabarlar hech qayerda saqlanmaydi va faqatgina o'sha vaqtning o'zida tahlil qilish uchun ishlatiladi.\n\n"
-        "⚠️ *Ogohlantirish va Mas'uliyat*\n"
+        "⚠️ <b>Ogohlantirish va Mas'uliyat</b>\n"
         "Ushbu bot Sun'iy Intellekt (AI) yordamida ishlaydi va uning javoblari 100% aniq bo'lmasligi yoki xatoliklarga yo'l qo'yishi mumkin. "
-        "Bot yaratuvchilari va ma'murlari sizning ekinlaringiz hosildorligi, holati yoki qo'llanilgan kimyoviy moddalar natijasida kelib chiqadigan har qanday zararlar uchun **HECH QANDAY JAVOBGARLIKNI O'Z ZIMMASIGA OLMAYDI**.\n"
+        "Bot yaratuvchilari va ma'murlari sizning ekinlaringiz hosildorligi, holati yoki qo'llanilgan kimyoviy moddalar natijasida kelib chiqadigan har qanday zararlar uchun <b>HECH QANDAY JAVOBGARLIKNI O'Z ZIMMASIGA OLMAYDI</b>.\n"
         "Kuchli kimyoviy moddalarni qo'llashdan oldin, albatta mahalliy agronom mutaxassislar bilan maslahatlashishingizni tavsiya qilamiz.\n\n"
-        "📜 *Foydalanish shartlari*\n"
+        "📜 <b>Foydalanish shartlari</b>\n"
         "Botdan foydalanish orqali siz ushbu shartlarga rozilik bildirasiz."
     )
     await message.answer(privacy_text)
@@ -220,7 +196,7 @@ async def process_broadcast_message(message: Message, state: FSMContext) -> None
             fail_count += 1
 
     await status_msg.edit_text(
-        f"✅ *Reklama tarqatish yakunlandi!*\n\n"
+        f"✅ <b>Reklama tarqatish yakunlandi!</b>\n\n"
         f"Muvaffaqiyatli: {success_count} ta\n"
         f"Xatolik (Bloklaganlar): {fail_count} ta"
     )
@@ -234,7 +210,7 @@ async def command_start_handler(message: Message) -> None:
 
     welcome_text = (
         "👋 Assalomu alaykum! Men Agro-Doktor AI - sun'iy intellektga asoslangan o'simliklar shifokoriman.\n\n"
-        "🌱 Ekinlaringiz, gullaringiz yoki daraxtlaringiz kasallangan bo'lsa, menga ularning bargi, mevasi yoki poyasi **rasmini yuboring**.\n"
+        "🌱 Ekinlaringiz, gullaringiz yoki daraxtlaringiz kasallangan bo'lsa, menga ularning bargi, mevasi yoki poyasi <b>rasmini yuboring</b>.\n"
         "Men darhol kasallikni aniqlayman va uni davolash rejasini taqdim etaman!\n\n"
         "📸 Iltimos, muammoni aniq ko'rsatadigan rasm yuboring."
     )
@@ -254,31 +230,27 @@ async def handle_photo(message: Message) -> None:
 
         # Download the photo as bytes
         file_info = await bot.get_file(photo_meta.file_id)
-        downloaded_file = await bot.download_file(file_info.file_path)
+        image_stream = io.BytesIO()
+        await bot.download_file(file_info.file_path, destination=image_stream)
 
-        if not downloaded_file:
+        image_bytes = image_stream.getvalue()
+        if not image_bytes:
             await wait_message.edit_text("❌ Rasmni yuklab olishda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
             return
 
-        image_bytes = downloaded_file.read()
         image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type='image/jpeg')
 
-        # Prepare parts
+        # Prepare parts statelessly
         parts = [image_part]
         if message.caption:
             parts.append(genai_types.Part.from_text(text=message.caption))
         else:
             parts.append(genai_types.Part.from_text(text="Iltimos ushbu rasmdagi o'simlikni tahlil qilib bering."))
 
-        # Add to history
-        user_id = message.from_user.id
-        update_user_history(user_id, "user", parts)
-
-        # Call Gemini AI statelessly with history and system instruction
-        history = get_user_history(user_id)
+        # Call Gemini AI statelessly
         response = await gemini_client.aio.models.generate_content(
             model='gemini-3.8-flash',
-            contents=history,
+            contents=parts,
             config=genai_types.GenerateContentConfig(
                 system_instruction=AGRONOMY_PROMPT
             )
@@ -286,25 +258,35 @@ async def handle_photo(message: Message) -> None:
 
         # Reply with the result
         if response.text:
-            update_user_history(user_id, "model", [genai_types.Part.from_text(text=response.text)])
-            await wait_message.edit_text(response.text)
+            try:
+                await wait_message.edit_text(response.text, parse_mode=ParseMode.HTML)
+            except Exception as e:
+                logger.warning(f"Failed to parse HTML, falling back to plain text: {e}")
+                await wait_message.edit_text(response.text, parse_mode=None)
         else:
-            pop_last_user_message(user_id)
             await wait_message.edit_text("❌ Kechirasiz, tahlil qilish imkoni bo'lmadi. Boshqa aniqroq rasm yuborib ko'ring.")
 
     except APIError as e:
-        pop_last_user_message(message.from_user.id)
         if "503" in str(e):
             logger.warning(f"Gemini API 503 Service Unavailable: {e}")
             await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
         else:
             logger.error(f"Gemini API Error: {e}", exc_info=True)
-            await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
+            error_msg = str(e)[:150]
+            await wait_message.edit_text(f"❌ API Xatolik: {error_msg}...")
     except Exception as e:
-        pop_last_user_message(message.from_user.id)
         logger.error(f"Error handling photo: {e}", exc_info=True)
-        await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
+        error_msg = str(e)[:150]
+        await wait_message.edit_text(f"❌ Tizimda xatolik: {error_msg}...")
 
+
+@dp.message(F.text & ~F.text.startswith('/'))
+async def handle_text_fallback(message: Message) -> None:
+    """Fallback handler for text messages telling users to send a photo."""
+    await message.answer(
+        "🌱 Kechirasiz, men matnli savollarga javob bera olmayman.\n\n"
+        "Iltimos, ekinlaringiz yoki o'simliklaringizdagi kasallikni aniqlash uchun menga ularning <b>rasmini yuboring</b> 📸"
+    )
 
 async def health_check(request: web.Request) -> web.Response:
     """Minimal health check endpoint for Render."""
