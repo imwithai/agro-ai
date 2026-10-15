@@ -43,7 +43,7 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 # Store chat history per user ID
 user_histories = {}
 
-# Specialized agronomy prompt for Gemini
+# Specialized agronomy prompt for Gemini (Photo Analysis)
 AGRONOMY_PROMPT = """
 Sen 20 yillik tajribaga ega professional agronom va o'simliklar shifokorisan.
 Mijoz senga kasal bo'lgan o'simlik bargi, mevasi yoki poyasi rasmini yuboradi.
@@ -71,6 +71,16 @@ Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 
 🛡️ **5. Oldini olish maslahati:**
 [Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
+"""
+
+# Specialized agronomy prompt for text-only questions
+TEXT_AGRONOMY_PROMPT = """
+Sen 20 yillik tajribaga ega professional agronom va o'simliklar shifokorisan.
+Mijoz senga qishloq xo'jaligi, dehqonchilik yoki o'simliklar parvarishi haqida savol beradi.
+Sening vazifang - oddiy, tushunarli va dehqonbop o'zbek tilida qisqa va aniq javob berish.
+Javobing Telegramda mobil ekranda o'qishga qulay bo'lishi kerak.
+Ortiqcha uzun gaplardan saqlan. Asosiy atamalarni qalin qilib yoz.
+Agar kerak bo'lsa, dori vositalari, xalqona usullar va tavsiyalarni aniq ko'rsat.
 """
 
 def get_user_history(user_id: int):
@@ -308,34 +318,28 @@ async def handle_photo(message: Message) -> None:
 @dp.message(F.text & ~F.text.startswith('/'))
 async def handle_text(message: Message) -> None:
     """
-    This handler receives text-only follow-up questions from the user and maintains conversational context.
+    This handler receives text-only follow-up questions from the user.
+    It processes text questions statelessly to prevent chat history corruption.
     It ignores messages starting with a slash (commands).
     """
     wait_message = await message.answer("💬 Javob tayyorlanmoqda...")
 
     try:
-        user_id = message.from_user.id
-        parts = [genai_types.Part.from_text(text=message.text)]
-        update_user_history(user_id, "user", parts)
-
-        history = get_user_history(user_id)
         response = await gemini_client.aio.models.generate_content(
             model='gemini-3.8-flash',
-            contents=history,
+            contents=message.text,
             config=genai_types.GenerateContentConfig(
-                system_instruction=AGRONOMY_PROMPT
+                system_instruction=TEXT_AGRONOMY_PROMPT,
+                temperature=0.7
             )
         )
 
         if response.text:
-            update_user_history(user_id, "model", [genai_types.Part.from_text(text=response.text)])
             await wait_message.edit_text(response.text)
         else:
-            pop_last_user_message(user_id)
             await wait_message.edit_text("❌ Kechirasiz, javob shakllantirib bo'lmadi.")
 
     except APIError as e:
-        pop_last_user_message(message.from_user.id)
         if "503" in str(e):
             logger.warning(f"Gemini API 503 Service Unavailable: {e}")
             await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
@@ -343,7 +347,6 @@ async def handle_text(message: Message) -> None:
             logger.error(f"Gemini API Error: {e}", exc_info=True)
             await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
     except Exception as e:
-        pop_last_user_message(message.from_user.id)
         logger.error(f"Error handling text: {e}", exc_info=True)
         await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
 
