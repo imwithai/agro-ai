@@ -161,6 +161,21 @@ async def help_command_handler(message: Message) -> None:
         "👉 @AdminUsername"
     )
 
+@dp.message(Command("privacy"))
+async def privacy_command_handler(message: Message) -> None:
+    """Privacy and Terms of Use command handler."""
+    privacy_text = (
+        "🔐 *Maxfiylik va Xavfsizlik*\n"
+        "Sizning xavfsizligingiz biz uchun muhim. Siz yuborgan rasmlar va xabarlar hech qayerda saqlanmaydi va faqatgina o'sha vaqtning o'zida tahlil qilish uchun ishlatiladi.\n\n"
+        "⚠️ *Ogohlantirish va Mas'uliyat*\n"
+        "Ushbu bot Sun'iy Intellekt (AI) yordamida ishlaydi va uning javoblari 100% aniq bo'lmasligi yoki xatoliklarga yo'l qo'yishi mumkin. "
+        "Bot yaratuvchilari va ma'murlari sizning ekinlaringiz hosildorligi, holati yoki qo'llanilgan kimyoviy moddalar natijasida kelib chiqadigan har qanday zararlar uchun **HECH QANDAY JAVOBGARLIKNI O'Z ZIMMASIGA OLMAYDI**.\n"
+        "Kuchli kimyoviy moddalarni qo'llashdan oldin, albatta mahalliy agronom mutaxassislar bilan maslahatlashishingizni tavsiya qilamiz.\n\n"
+        "📜 *Foydalanish shartlari*\n"
+        "Botdan foydalanish orqali siz ushbu shartlarga rozilik bildirasiz."
+    )
+    await message.answer(privacy_text)
+
 @dp.message(BroadcastState.waiting_for_message)
 async def process_broadcast_message(message: Message, state: FSMContext) -> None:
     """Handles the message sent by admin for broadcast."""
