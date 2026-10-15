@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -99,9 +100,8 @@ async def handle_photo(message: Message) -> None:
 
         image_bytes = downloaded_file.read()
 
-        # Call Gemini AI
-        response = await asyncio.to_thread(
-            gemini_client.models.generate_content,
+        # Call Gemini AI asynchronously
+        response = await gemini_client.aio.models.generate_content(
             model='gemini-3.8-flash',
             contents=[
                 AGRONOMY_PROMPT,
@@ -115,16 +115,42 @@ async def handle_photo(message: Message) -> None:
         else:
             await wait_message.edit_text("❌ Kechirasiz, tahlil qilish imkoni bo'lmadi. Boshqa aniqroq rasm yuborib ko'ring.")
 
+    except APIError as e:
+        if "503" in str(e):
+            logger.warning(f"Gemini API 503 Service Unavailable: {e}")
+            await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
+        else:
+            logger.error(f"Gemini API Error: {e}", exc_info=True)
+            await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
     except Exception as e:
         logger.error(f"Error handling photo: {e}", exc_info=True)
         await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
 
 
-async def main() -> None:
-    # Start polling
-    logger.info("Starting bot...")
-    await dp.start_polling(bot)
+async def health_check(request: web.Request) -> web.Response:
+    """Minimal health check endpoint for Render."""
+    return web.Response(text="Agro-Doktor AI Bot is running.")
 
+async def start_web_server():
+    """Starts a minimal aiohttp web server."""
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    logger.info(f"Starting web server on port {port}")
+    await site.start()
+
+async def main() -> None:
+    # Start web server and bot polling concurrently
+    logger.info("Starting bot and web server...")
+
+    await asyncio.gather(
+        start_web_server(),
+        dp.start_polling(bot)
+    )
 
 if __name__ == "__main__":
     try:
