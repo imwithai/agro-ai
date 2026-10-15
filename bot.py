@@ -40,8 +40,8 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=Pars
 dp = Dispatcher()
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Store chat sessions per user ID
-user_chats = {}
+# Store chat history per user ID
+user_histories = {}
 
 # Specialized agronomy prompt for Gemini
 AGRONOMY_PROMPT = """
@@ -73,16 +73,29 @@ Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 [Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
 """
 
-def get_or_create_chat(user_id: int):
-    """Gets an existing chat session or creates a new one for the user."""
-    if user_id not in user_chats:
-        user_chats[user_id] = gemini_client.aio.chats.create(
-            model='gemini-3.8-flash',
-            config=genai_types.GenerateContentConfig(
-                system_instruction=AGRONOMY_PROMPT
-            )
-        )
-    return user_chats[user_id]
+def get_user_history(user_id: int):
+    """Gets the chat history for a user, maintaining stateless context."""
+    if user_id not in user_histories:
+        user_histories[user_id] = []
+    return user_histories[user_id]
+
+def update_user_history(user_id: int, role: str, parts: list):
+    """Appends a new message to the user's history and truncates if too long."""
+    history = get_user_history(user_id)
+    history.append(genai_types.Content(role=role, parts=parts))
+    # Keep history manageable (e.g., last 10 messages) to prevent token limits
+    # Gemini requires alternating roles and the first role must be 'user'
+    if len(history) > 10:
+        sliced_history = history[-10:]
+        if sliced_history[0].role != "user":
+            sliced_history = sliced_history[1:]
+        user_histories[user_id] = sliced_history
+
+def pop_last_user_message(user_id: int):
+    """Removes the last user message from history on API failure to prevent back-to-back user roles."""
+    history = get_user_history(user_id)
+    if history and history[-1].role == "user":
+        history.pop()
 
 USERS_FILE = "users.txt"
 
@@ -250,25 +263,37 @@ async def handle_photo(message: Message) -> None:
         image_bytes = downloaded_file.read()
         image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type='image/jpeg')
 
-        # Prepare contents (include caption if user sent one)
-        contents = [image_part]
+        # Prepare parts
+        parts = [image_part]
         if message.caption:
-            contents.append(message.caption)
-        elif not user_chats.get(message.from_user.id):
-            # First message with no caption
-            contents.append("Iltimos ushbu rasmdagi o'simlikni tahlil qilib bering.")
+            parts.append(genai_types.Part.from_text(text=message.caption))
+        else:
+            parts.append(genai_types.Part.from_text(text="Iltimos ushbu rasmdagi o'simlikni tahlil qilib bering."))
 
-        # Get chat session and send message
-        chat = get_or_create_chat(message.from_user.id)
-        response = await chat.send_message(contents)
+        # Add to history
+        user_id = message.from_user.id
+        update_user_history(user_id, "user", parts)
+
+        # Call Gemini AI statelessly with history and system instruction
+        history = get_user_history(user_id)
+        response = await gemini_client.aio.models.generate_content(
+            model='gemini-3.8-flash',
+            contents=history,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=AGRONOMY_PROMPT
+            )
+        )
 
         # Reply with the result
         if response.text:
+            update_user_history(user_id, "model", [genai_types.Part.from_text(text=response.text)])
             await wait_message.edit_text(response.text)
         else:
+            pop_last_user_message(user_id)
             await wait_message.edit_text("❌ Kechirasiz, tahlil qilish imkoni bo'lmadi. Boshqa aniqroq rasm yuborib ko'ring.")
 
     except APIError as e:
+        pop_last_user_message(message.from_user.id)
         if "503" in str(e):
             logger.warning(f"Gemini API 503 Service Unavailable: {e}")
             await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
@@ -276,6 +301,7 @@ async def handle_photo(message: Message) -> None:
             logger.error(f"Gemini API Error: {e}", exc_info=True)
             await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
     except Exception as e:
+        pop_last_user_message(message.from_user.id)
         logger.error(f"Error handling photo: {e}", exc_info=True)
         await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
 
@@ -287,15 +313,28 @@ async def handle_text(message: Message) -> None:
     wait_message = await message.answer("✍️ Yozilmoqda...")
 
     try:
-        chat = get_or_create_chat(message.from_user.id)
-        response = await chat.send_message(message.text)
+        user_id = message.from_user.id
+        parts = [genai_types.Part.from_text(text=message.text)]
+        update_user_history(user_id, "user", parts)
+
+        history = get_user_history(user_id)
+        response = await gemini_client.aio.models.generate_content(
+            model='gemini-3.8-flash',
+            contents=history,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=AGRONOMY_PROMPT
+            )
+        )
 
         if response.text:
+            update_user_history(user_id, "model", [genai_types.Part.from_text(text=response.text)])
             await wait_message.edit_text(response.text)
         else:
+            pop_last_user_message(user_id)
             await wait_message.edit_text("❌ Kechirasiz, javob shakllantirib bo'lmadi.")
 
     except APIError as e:
+        pop_last_user_message(message.from_user.id)
         if "503" in str(e):
             logger.warning(f"Gemini API 503 Service Unavailable: {e}")
             await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
@@ -303,6 +342,7 @@ async def handle_text(message: Message) -> None:
             logger.error(f"Gemini API Error: {e}", exc_info=True)
             await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
     except Exception as e:
+        pop_last_user_message(message.from_user.id)
         logger.error(f"Error handling text: {e}", exc_info=True)
         await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
 
