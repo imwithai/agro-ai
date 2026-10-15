@@ -128,14 +128,21 @@ def get_config() -> dict:
 def save_config(data: dict):
     save_db(CONFIG_DB_FILE, data)
 
-def get_main_keyboard():
-    """Returns the persistent main keyboard."""
-    return ReplyKeyboardMarkup(
-        keyboard=[
+def get_main_keyboard(is_vip: bool = False):
+    """Returns the persistent main keyboard, dynamically adjusting for VIP users."""
+    if is_vip:
+        keyboard = [
+            [KeyboardButton(text="📸 Rasm yuborish (Cheksiz Tahlil)")],
+            [KeyboardButton(text="🤝 Do'stni taklif qilish"), KeyboardButton(text="ℹ️ Yordam (/help)")]
+        ]
+    else:
+        keyboard = [
             [KeyboardButton(text="📸 Rasm yuborish (Tahlil qilish)")],
             [KeyboardButton(text="👑 VIP Obuna"), KeyboardButton(text="🤝 Do'stni taklif qilish")],
             [KeyboardButton(text="ℹ️ Yordam (/help)")]
-        ],
+        ]
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
         resize_keyboard=True,
         is_persistent=True
     )
@@ -432,7 +439,7 @@ async def approve_vip_callback(callback: CallbackQuery):
     await callback.message.reply(f"✅ Foydalanuvchi {user_id} VIP ga o'tkazildi.")
 
     try:
-        await bot.send_message(user_id, "🎉 <b>Tabriklaymiz!</b> Sizning VIP tolovingiz admin tomonidan tasdiqlandi. Siz endi 30 kun davomida VIP imtiyozlaridan foydalanishingiz mumkin!")
+        await bot.send_message(user_id, "🎉 <b>Tabriklaymiz! Sizning VIP obunangiz muvaffaqiyatli faollashtirildi (30 kun).</b>", reply_markup=get_main_keyboard(is_vip=True))
     except Exception:
         pass
     await callback.answer()
@@ -448,7 +455,7 @@ async def reject_vip_callback(callback: CallbackQuery):
     await callback.message.reply(f"❌ Foydalanuvchi {user_id} tolovi rad etildi.")
 
     try:
-        await bot.send_message(user_id, "❌ <b>Tolov rad etildi.</b> Iltimos, adminga murojaat qiling yoki qaytadan tolovni amalga oshiring.")
+        await bot.send_message(user_id, "❌ <b>Afsuski, to'lov chekingiz tasdiqlanmadi yoki rad etildi. Iltimos, ma'lumotlarni tekshirib qaytadan urinib ko'ring.</b>")
     except Exception:
         pass
     await callback.answer()
@@ -486,6 +493,11 @@ async def help_command_handler(message: Message) -> None:
 @dp.message(Command("pricing"))
 async def vip_command_handler(message: Message) -> None:
     """Displays VIP subscription info."""
+    user = get_user(message.from_user.id)
+    if user.get("is_vip", False):
+        await message.answer("Sizda allaqachon faol VIP obuna mavjud! Yaroqlilik muddati tugagandan so'ng uzaytirishingiz mumkin.")
+        return
+
     config = get_config()
     card_number = config.get("payment_card", "Mavjud emas")
 
@@ -569,7 +581,7 @@ async def process_broadcast_message(message: Message, state: FSMContext) -> None
         f"Xatolik (Bloklaganlar): {fail_count} ta"
     )
 
-def check_user_limits(user_id: int) -> bool:
+async def check_user_limits(user_id: int) -> bool:
     """Returns True if the user can make a request, False if they hit the limit."""
     user = get_user(user_id)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -582,8 +594,13 @@ def check_user_limits(user_id: int) -> bool:
                 return True
             else:
                 update_user(user_id, {"is_vip": False, "vip_expires_at": None})
-                return False # Let them fall through to free limits
-        return True # Lifetime VIP fallback
+                try:
+                    await bot.send_message(user_id, "⚠️ <b>VIP obunangiz muddati tugadi.</b> Siz endi bepul limitdan foydalanishingiz mumkin yoki obunani qayta xarid qilishingiz mumkin.", reply_markup=get_main_keyboard(is_vip=False))
+                except Exception:
+                    pass
+                user = get_user(user_id) # Reload to fall through to free limits
+        else:
+            return True # Lifetime VIP fallback
 
     if user["last_analysis_date"] != today:
         update_user(user_id, {"last_analysis_date": today, "request_count": 0})
@@ -636,7 +653,7 @@ async def command_start_handler(message: Message) -> None:
         "Men darhol kasallikni aniqlayman va uni davolash rejasini taqdim etaman!\n\n"
         "📸 Iltimos, muammoni aniq ko'rsatadigan rasm yuboring."
     )
-    await message.answer(welcome_text, reply_markup=get_main_keyboard())
+    await message.answer(welcome_text, reply_markup=get_main_keyboard(is_vip=user.get("is_vip", False)))
 
 @dp.message(Command("promo"))
 async def promo_command_handler(message: Message) -> None:
@@ -656,7 +673,7 @@ async def promo_command_handler(message: Message) -> None:
             from datetime import timedelta
             expiry = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
             update_user(message.from_user.id, {"is_vip": True, "vip_expires_at": expiry})
-            await message.answer("🎉 <b>Promo kod qabul qilindi!</b> Sizga 30 kunlik VIP maqom berildi.")
+            await message.answer("🎉 <b>Promo kod qabul qilindi!</b> Sizga 30 kunlik VIP maqom berildi.", reply_markup=get_main_keyboard(is_vip=True))
         elif reward == "bonus":
             user = get_user(message.from_user.id)
             update_user(message.from_user.id, {"referred_bonus": user.get("referred_bonus", 0) + 1})
@@ -678,7 +695,7 @@ async def handle_photo(message: Message) -> None:
     if await require_subscription(message):
         return
 
-    if not check_user_limits(message.from_user.id):
+    if not await check_user_limits(message.from_user.id):
         await message.answer("❌ Kunlik bepul limit tugadi!\n\nIltimos, qo'shimcha so'rovlar uchun do'stlaringizni taklif qiling (/referral) yoki VIP obuna xarid qiling (/vip).")
         return
 
@@ -758,10 +775,12 @@ async def handle_photo(message: Message) -> None:
 async def handle_text_fallback(message: Message) -> None:
     """Fallback handler for text messages and keyboard buttons."""
     text = message.text
+    user = get_user(message.from_user.id)
+    is_vip = user.get("is_vip", False)
 
-    if text == "📸 Rasm yuborish (Tahlil qilish)":
+    if text in ["📸 Rasm yuborish (Tahlil qilish)", "📸 Rasm yuborish (Cheksiz Tahlil)"]:
         await message.answer("📸 <b>Iltimos, ekinlaringiz yoki o'simliklaringizdagi kasallikni aniqlash uchun menga ularning rasmini yuboring.</b>")
-    elif text == "👑 VIP Obuna":
+    elif text == "👑 VIP Obuna" and not is_vip:
         await vip_command_handler(message)
     elif text == "🤝 Do'stni taklif qilish":
         await referral_command_handler(message)
@@ -771,7 +790,7 @@ async def handle_text_fallback(message: Message) -> None:
         await message.answer(
             "🌱 Kechirasiz, men matnli savollarga javob bera olmayman.\n\n"
             "Iltimos, ekinlaringiz yoki o'simliklaringizdagi kasallikni aniqlash uchun menga ularning <b>rasmini yuboring</b> 📸",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(is_vip=is_vip)
         )
 
 async def health_check(request: web.Request) -> web.Response:
@@ -790,6 +809,34 @@ async def start_web_server():
     logger.info(f"Starting web server on port {port}")
     await site.start()
 
+async def check_vip_expirations():
+    """Background task to check VIP expirations daily and send warnings."""
+    while True:
+        try:
+            db = load_db(USERS_DB_FILE, {})
+            now = datetime.now(timezone.utc)
+            for user_id_str, user_data in db.items():
+                if user_data.get("is_vip") and user_data.get("vip_expires_at"):
+                    expiry = datetime.fromisoformat(user_data["vip_expires_at"])
+                    days_left = (expiry - now).days
+
+                    user_id = int(user_id_str)
+                    if days_left == 3:
+                        try:
+                            await bot.send_message(user_id, f"⚠️ Hurmatli VIP foydalanuvchi, obunangiz muddati 3 kundan so'ng ({expiry.strftime('%Y-%m-%d')}) tugaydi. Obunani uzaytirish uchun tayyorgarlik ko'ring.")
+                        except Exception:
+                            pass
+                    elif days_left == 1:
+                        try:
+                            await bot.send_message(user_id, f"⚠️ Hurmatli VIP foydalanuvchi, obunangiz muddati ertaga ({expiry.strftime('%Y-%m-%d')}) tugaydi. Obunani uzaytirish uchun /vip buyrug'idan foydalanishingiz mumkin bo'ladi.")
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Error in VIP expiration checker: {e}")
+
+        # Run check once a day
+        await asyncio.sleep(86400)
+
 async def main() -> None:
     # Drop pending updates to avoid webhook conflict
     await bot.delete_webhook(drop_pending_updates=True)
@@ -799,6 +846,7 @@ async def main() -> None:
 
     await asyncio.gather(
         start_web_server(),
+        check_vip_expirations(),
         dp.start_polling(bot)
     )
 
