@@ -305,12 +305,13 @@ async def handle_photo(message: Message) -> None:
         logger.error(f"Error handling photo: {e}", exc_info=True)
         await wait_message.edit_text("❌ Kechirasiz, tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.")
 
-@dp.message(F.text)
+@dp.message(F.text & ~F.text.startswith('/'))
 async def handle_text(message: Message) -> None:
     """
     This handler receives text-only follow-up questions from the user and maintains conversational context.
+    It ignores messages starting with a slash (commands).
     """
-    wait_message = await message.answer("✍️ Yozilmoqda...")
+    wait_message = await message.answer("💬 Javob tayyorlanmoqda...")
 
     try:
         user_id = message.from_user.id
