@@ -1,0 +1,10 @@
+{
+    "12345": {
+        "is_vip": false,
+        "vip_expires_at": null,
+        "last_analysis_date": "2026-10-15",
+        "request_count": 5,
+        "referred_bonus": 0,
+        "referred_by": null
+    }
+}
