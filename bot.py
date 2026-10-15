@@ -8,12 +8,16 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.filters import CommandStart, Command
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramAPIError
 from dotenv import load_dotenv
 
 from google import genai
 from google.genai import types as genai_types
+from google.genai.errors import APIError
 
 # Load environment variables
 load_dotenv()
@@ -25,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Constants
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     logger.error("Missing TELEGRAM_BOT_TOKEN or GEMINI_API_KEY environment variables.")
@@ -65,11 +70,126 @@ Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 [Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
 """
 
+USERS_FILE = "users.txt"
+
+def add_user(user_id: int):
+    """Adds a user ID to users.txt if not already present."""
+    users = set()
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r") as f:
+            users = set(f.read().splitlines())
+
+    if str(user_id) not in users:
+        with open(USERS_FILE, "a") as f:
+            f.write(f"{user_id}\n")
+
+class BroadcastState(StatesGroup):
+    waiting_for_message = State()
+    waiting_for_support_message = State()
+
+def get_admin_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
+            [InlineKeyboardButton(text="📢 Reklama tarqatish", callback_data="admin_broadcast")],
+            [InlineKeyboardButton(text="🛠 Qollab-quvvatlash", callback_data="admin_support")]
+        ]
+    )
+
+@dp.message(Command("admin"))
+async def admin_handler(message: Message) -> None:
+    """Admin panel handler."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    await message.answer("🛠 *Admin Paneliga xush kelibsiz!*", reply_markup=get_admin_keyboard())
+
+@dp.callback_query(F.data.startswith("admin_"))
+async def admin_callbacks(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Siz admin emassiz!", show_alert=True)
+        return
+
+    action = callback.data.split("_")[1]
+
+    if action == "stats":
+        users = []
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, "r") as f:
+                users = f.read().splitlines()
+        await callback.answer()
+        await callback.message.answer(f"📊 *Statistika:*\n\nJami foydalanuvchilar: {len(users)} ta")
+
+    elif action == "broadcast":
+        await callback.answer()
+        await state.set_state(BroadcastState.waiting_for_message)
+        await callback.message.answer("📢 *Reklama tarqatish*\n\nTarqatmoqchi bo'lgan xabaringizni yuboring (matn, rasm yoki video):", reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_broadcast")]]
+        ))
+
+    elif action == "support":
+        await callback.answer()
+        await callback.message.answer("🛠 *Qo'llab-quvvatlash*\n\nFoydalanuvchilar savol yo'llashlari uchun admin bilan bog'lanish:\n@AdminUsername (sozlash mumkin)")
+
+@dp.callback_query(F.data == "cancel_broadcast")
+async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    await state.clear()
+    await callback.message.edit_text("❌ Reklama tarqatish bekor qilindi.")
+    await callback.answer()
+
+@dp.message(Command("help"))
+async def help_command_handler(message: Message) -> None:
+    """Help command for users to get support."""
+    await message.answer(
+        "🛠 *Qo'llab-quvvatlash bo'limi*\n\n"
+        "Savollaringiz yoki takliflaringiz bo'lsa, adminga murojaat qilishingiz mumkin:\n"
+        "👉 @AdminUsername"
+    )
+
+@dp.message(BroadcastState.waiting_for_message)
+async def process_broadcast_message(message: Message, state: FSMContext) -> None:
+    """Handles the message sent by admin for broadcast."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await state.clear()
+
+    users = []
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r") as f:
+            users = f.read().splitlines()
+
+    if not users:
+        await message.answer("❌ Foydalanuvchilar ro'yxati bo'sh!")
+        return
+
+    status_msg = await message.answer("⏳ Reklama tarqatilmoqda... Iltimos kuting.")
+
+    success_count = 0
+    fail_count = 0
+
+    for user_id in users:
+        try:
+            await message.send_copy(chat_id=user_id)
+            success_count += 1
+            await asyncio.sleep(0.05) # Prevent hitting rate limits
+        except Exception:
+            fail_count += 1
+
+    await status_msg.edit_text(
+        f"✅ *Reklama tarqatish yakunlandi!*\n\n"
+        f"Muvaffaqiyatli: {success_count} ta\n"
+        f"Xatolik (Bloklaganlar): {fail_count} ta"
+    )
+
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
     """
     This handler receives messages with `/start` command
     """
+    add_user(message.from_user.id)
+
     welcome_text = (
         "👋 Assalomu alaykum! Men Agro-Doktor AI - sun'iy intellektga asoslangan o'simliklar shifokoriman.\n\n"
         "🌱 Ekinlaringiz, gullaringiz yoki daraxtlaringiz kasallangan bo'lsa, menga ularning bargi, mevasi yoki poyasi **rasmini yuboring**.\n"
