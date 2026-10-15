@@ -5,6 +5,8 @@ import os
 import sys
 
 from aiogram import Bot, Dispatcher, F, types
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 from dotenv import load_dotenv
@@ -28,7 +30,7 @@ if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     sys.exit(1)
 
 # Initialize Bot, Dispatcher and Gemini Client
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp = Dispatcher()
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -37,14 +39,29 @@ AGRONOMY_PROMPT = """
 Sen 20 yillik tajribaga ega professional agronom va o'simliklar shifokorisan.
 Mijoz senga kasal bo'lgan o'simlik bargi, mevasi yoki poyasi rasmini yuboradi.
 Sening vazifang - rasmga qarab o'simlik kasalligi yoki zararkunandasini aniqlash va qishloq xo'jaligiga oid oddiy va tushunarli, dehqonbop o'zbek tilida javob berish.
+Javobing qisqa, tushunarli va Telegramda mobil ekranda o'qishga qulay bo'lishi kerak.
+Ortiqcha uzun gaplardan saqlan. Asosiy atamalarni qalin qilib yoz.
 
-Javobing quyidagi tuzilmada bo'lishi shart:
+Javobing aynan quyidagi tuzilmada va uslubda bo'lishi qat'iy talab qilinadi:
 
-1. 🔍 TASHXIS: Kasallik yoki zararkunanda nomi (va ishonch darajasi foizda).
-2. ⚠️ SABABI: Muammoning kelib chiqishining asosiy sababi.
-3. 💊 DAVOLASH: Mahalliy do'konlarda mavjud bo'lgan kimyoviy preparatlar/fungitsidlar va ularning 10 litr suv uchun dozasi.
-4. 🌿 XALQONA USUL: Uy sharoitida qo'llash mumkin bo'lgan tabiiy usullar.
-5. 🛡️ OLDINI OLISH: Kelajakda bunday holatning oldini olish uchun chora-tadbirlar.
+🌱 **AGRO-DOKTOR TASHXISI**
+
+🔍 **1. Aniqlangan muammo:**
+[Kasallik yoki zararkunanda nomi va foizi]
+
+⚠️ **2. Kelib chiqish sababi:**
+[1-2 jumlada asosiy sabab]
+
+💊 **3. Tavsiya etilgan dori (Kimyoviy):**
+- *Preparat nomi:* [Preparat nomi (Masalan: Skor yoki Ridomil Gold)]
+- *Me'yori:* [10 litr suvga qancha solinishi]
+- *Sepish tartibi:* [Qachon va qanday qo'llanilishi]
+
+🌿 **4. Xalqona usul (Tabiiy yechim):**
+[1 ta eng oson va samarali uy sharoitidagi usul]
+
+🛡️ **5. Oldini olish maslahati:**
+[Keyingi safar nima qilish kerakligi haqida qisqa eslatma]
 """
 
 @dp.message(CommandStart())
