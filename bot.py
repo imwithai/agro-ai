@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
+MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"]
 
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     logger.error("Missing TELEGRAM_BOT_TOKEN or GEMINI_API_KEY environment variables.")
@@ -251,33 +252,45 @@ async def handle_photo(message: Message) -> None:
         else:
             parts.append(genai_types.Part.from_text(text="Iltimos ushbu rasmdagi o'simlikni tahlil qilib bering."))
 
-        # Call Gemini AI statelessly
-        response = await gemini_client.aio.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=parts,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=AGRONOMY_PROMPT
-            )
-        )
+        # Call Gemini AI statelessly with fallback models loop
+        response = None
+        last_api_error = None
 
-        # Reply with the result
-        if response.text:
+        for model_name in MODELS:
+            try:
+                logger.info(f"Trying model: {model_name}")
+                response = await gemini_client.aio.models.generate_content(
+                    model=model_name,
+                    contents=parts,
+                    config=genai_types.GenerateContentConfig(
+                        system_instruction=AGRONOMY_PROMPT
+                    )
+                )
+                break  # Success, exit the fallback loop
+            except APIError as e:
+                logger.warning(f"Model {model_name} failed with APIError: {e}")
+                last_api_error = e
+                continue # Try the next model
+
+        if response and response.text:
             try:
                 await wait_message.edit_text(response.text, parse_mode=ParseMode.HTML)
             except Exception as e:
                 logger.warning(f"Failed to parse HTML, falling back to plain text: {e}")
                 await wait_message.edit_text(response.text, parse_mode=None)
+        elif last_api_error:
+            # Handle the case where all models failed
+            error_str = str(last_api_error)
+            if "429" in error_str or "503" in error_str:
+                logger.warning(f"All models failed due to rate limits or overload: {last_api_error}")
+                await wait_message.edit_text("⏳ Hozirda bepul so'rovlar limiti vaqtincha to'ldi. Iltimos, 1 daqiqadan so'ng qayta yuboring.")
+            else:
+                logger.error(f"All models failed with API Error: {last_api_error}", exc_info=True)
+                error_msg = str(last_api_error)[:150]
+                await wait_message.edit_text(f"❌ API Xatolik: {error_msg}...")
         else:
             await wait_message.edit_text("❌ Kechirasiz, tahlil qilish imkoni bo'lmadi. Boshqa aniqroq rasm yuborib ko'ring.")
 
-    except APIError as e:
-        if "503" in str(e):
-            logger.warning(f"Gemini API 503 Service Unavailable: {e}")
-            await wait_message.edit_text("⏳ Tizimda yuklama yuqori (503 Xatolik). Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring.")
-        else:
-            logger.error(f"Gemini API Error: {e}", exc_info=True)
-            error_msg = str(e)[:150]
-            await wait_message.edit_text(f"❌ API Xatolik: {error_msg}...")
     except Exception as e:
         logger.error(f"Error handling photo: {e}", exc_info=True)
         error_msg = str(e)[:150]
