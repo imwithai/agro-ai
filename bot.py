@@ -81,6 +81,10 @@ Sening vazifang - oddiy, tushunarli va dehqonbop o'zbek tilida qisqa va aniq jav
 Javobing Telegramda mobil ekranda o'qishga qulay bo'lishi kerak.
 Ortiqcha uzun gaplardan saqlan. Asosiy atamalarni qalin qilib yoz.
 Agar kerak bo'lsa, dori vositalari, xalqona usullar va tavsiyalarni aniq ko'rsat.
+
+DIQQAT (GUARDRAIL):
+Agar foydalanuvchining savoli qishloq xo'jaligi, o'simliklar, dehqonchilik yoki bog'dorchilikka umuman aloqador bo'lmasa (masalan, dasturlash, matematika, siyosat va hokazo), sen HECH QANDAY ma'lumot bermasdan faqatgina quyidagi matnni qaytarishing shart:
+"🌱 Kechirasiz, men faqat o'simliklar, dehqonchilik va kasalliklar bo'yicha maslahat beraman. Iltimos, ekinlaringiz bo'yicha savol bering yoki rasm yuboring."
 """
 
 def get_user_history(user_id: int):
