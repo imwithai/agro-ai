@@ -85,7 +85,7 @@ async def handle_photo(message: Message) -> None:
         # Call Gemini AI
         response = await asyncio.to_thread(
             gemini_client.models.generate_content,
-            model='gemini-2.5-flash',
+            model='gemini-3.8-flash',
             contents=[
                 AGRONOMY_PROMPT,
                 genai_types.Part.from_bytes(data=image_bytes, mime_type='image/jpeg')

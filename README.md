@@ -4,7 +4,7 @@ Agro-Doktor AI is a Telegram bot that helps farmers and gardeners diagnose plant
 
 ## Features
 - Diagnoses plant diseases from images of leaves, stems, or fruits.
-- Powered by `gemini-2.5-flash` for fast and accurate multimodal image analysis.
+- Powered by `gemini-3.8-flash` for fast and accurate multimodal image analysis.
 - Explains the root cause, offers chemical and home treatments, and provides preventative measures.
 - Completely serverless/stateless – processes each photo instantly without saving state.
 - Responds in simple, clear, and farmer-friendly Uzbek.
